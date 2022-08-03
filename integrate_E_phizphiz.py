@@ -1,42 +1,46 @@
 import numpy as np
-from scipy.integrate import quad
+from scipy.integrate import quad_vec
 from scipy.special import erf
 
-
-def integrand(zi, zj, mui, muj, si, sj, rho):
-    di = zi - mui
-    dj = zj - muj
-    return 1/(2*np.pi*si*sj*np.sqrt(1-rho**2)) * np.exp(-1/(2*(1-rho**2)) * (di**2/si**2 - 2*rho*di*dj/(si*sj) + dj**2/sj**2) ) * zi * zj
-
-def integral_z1(z2, mu1, mu2, s1, s2, rho):
-    mu_tilde = mu1 + rho*s1/s2*(z2-mu2)
-    s_tilde = s1**2 * (1-rho**2)
-    return 1/2 * (mu_tilde*erf(mu_tilde/(np.sqrt(2)*s_tilde)) + np.sqrt(2/np.pi)*s_tilde*np.exp(-mu_tilde**2/(2*s_tilde**2)) + mu_tilde)
-
-def integrand_phizphiz(z2, mu1, mu2, s1, s2, rho):
-    gaussian = 1/np.sqrt(2*np.pi*s2**2)*np.exp(-1/(2*s2**2)*(z2-mu2)**2)
-    return gaussian * z2 * integral_z1(z2, mu1, mu2, s1, s2, rho)
 
 def integrate_phizphiz(params):
     t, mu, V = params
     
     res = np.zeros(shape=(V.shape[1], V.shape[2]))
 
-    for i in range(V.shape[1]):
-        mui = mu[t, i]
-        si = np.sqrt(V[t, i, i])
 
-        res[i, i] = (si**2+mui**2)/2 * (erf(mui/(np.sqrt(2)*si)) + 1) + mui*si/np.sqrt(2*np.pi)*np.exp(-mui**2/(2*si**2))
+    mu1_vec = []
+    mu2_vec = []
+    s1_vec = []
+    s2_vec = []
+    rho_vec = []
 
     for i in range(V.shape[1]):
         for j in range(i+1, V.shape[2]):
-            mu1 = mu[t, i]
-            mu2 = mu[t, j]
-            s1 = np.sqrt(V[t, i, i])
-            s2 = np.sqrt(V[t, j, j])
-            rho = V[t, i, j]/(s1*s2)
+            mu1_vec.append(mu[t, i])
+            mu2_vec.append(mu[t, j])
+            s1_vec.append(np.sqrt(V[t, i, i]))
+            s2_vec.append(np.sqrt(V[t, j, j]))
+            rho_vec.append(V[t, i, j]/(s1_vec[-1]*s2_vec[-1]))
 
-            res[i, j] = quad(integrand_phizphiz, 0, np.Inf, args=(mu1, mu2, s1, s2, rho))[0]
-            res[j, i] = res[i, j]
+    mu1_vec = np.array(mu1_vec)
+    mu2_vec = np.array(mu2_vec)
+    s1_vec = np.array(s1_vec)
+    s2_vec = np.array(s2_vec)
+    rho_vec = np.array(rho_vec)
+
+    mu_vec = lambda z2: mu1_vec + rho_vec*s1_vec/s2_vec*(z2 - mu2_vec)
+    s_vec = np.sqrt(s1_vec**2 * (1-rho_vec**2))
+
+    integrand = lambda z2: 1/np.sqrt(2*np.pi*s2_vec**2)*np.exp(-(z2-mu2_vec)**2/(2*s2_vec**2)) * z2 * ( mu_vec(z2)*(erf(mu_vec(z2)/(np.sqrt(2)*s_vec)) + 1) + np.sqrt(2/np.pi)*s_vec*np.exp(-mu_vec(z2)**2/(2*s_vec**2)) )/2
+
+    res_vec = quad_vec(integrand, 0, np.Inf)[0]
+    triu_ind = np.triu_indices(V.shape[1], 1)
+    res[triu_ind] = res_vec
+    res += res.T
+
+    s_diag_vec = np.sqrt(np.diag(V[t]))
+    mu_diag_vec = mu[t]
+    res += np.diag((s_diag_vec**2+mu_diag_vec**2)/2 * (erf(mu_diag_vec/(np.sqrt(2)*s_diag_vec)) + 1) + mu_diag_vec*s_diag_vec/np.sqrt(2*np.pi)*np.exp(-mu_diag_vec**2/(2*s_diag_vec**2)))
 
     return res
